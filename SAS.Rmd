@@ -1,0 +1,450 @@
+---
+title: \Huge \textcolor{blue!50!black}{LE SONDAGE ALEATOIRE SIMPLE\\ \huge Estimations et pondérations avec \Huge $\mathcal{R}$\\ \Large réalisé par \large \sc{AMOUSSOU Kokou}}
+author: Ingénieur des Travaux Statistiques - Elève Ingénieur Statisticien économiste
+date: "`r Sys.time()`"
+documentclass: article
+mainfont: Calibri
+classoption: a4paper
+# usepackage: inputenc, fontenc, lmodern, babel
+output:
+  pdf_document: 
+    extra_dependencies: ["float", "tikz", "xcolor", "enumitem", "pifont", "titlesec", "lipsum","lmodern", "color", "setspace", "fancyhdr", "babel", "minitoc"]
+    fig_caption: yes
+    keep_tex: yes
+    #toc: yes
+    toc_depth: 6
+    number_sections: yes
+    df_print: tibble
+    fig_crop: no
+in_header: header.tex
+header-includes:
+  - \usepackage{hyperref}
+  - \usepackage[explicit]{titlesec}
+  - \usepackage[english,french]{babel}
+  - \usepackage[french]{minitoc}
+  - \definecolor{Mycol}{RGB}{000,050,100}
+geometry: margin=0.5in
+fontsize : 11pt
+vignette : >
+  %\VignetteIndexEntry{stationery}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.pos = "H", out.extra = ""#, cache = TRUE
+)
+```
+
+```{=tex}
+\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+\tableofcontents
+
+
+\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+```
+
+Un sujet qui peut intéresser certains d'entre nous en tant data users est l'exploitation de données issues d'un plan d'échantillonnage complexe. Je voudrais partager un petit travail sur le regression logistique pour les données d'échantillonnage complexe. Mais bien avant, je trouve nécessaire de présenter de manière un peu rapide les différents plans de sondage qui existent et de montrer la manière dont on peut les appliquer sous le logiciel R. Je veux donc faire une série de partages sur certains de ces plans de sondage.
+
+Généralement, quand nous sommes en face d'une base de sonnées, on ne pose pas tout de suite la question du plan de sondage utilisé. Pourtant, ce n'est que sur la base de ce plan qu'en réalité les estimations sur l'échantillon ne peuvent être tenues pour valides dans la population, puisque les estimations dépendent du plan de sondage. C'est pour dire par exemple qu'une moyenne estimée sur une base de données issues d'un SAS ne sera pas forcément la même si cette même base de données étaient issues d'un sondage stratifié ; c'est ce que la théorie dit. Si on s'en tient seulement au calcul habituel de la moyenne, on ne pourra être sûr d'elle que dans l'échantillon considéré. 
+
+Ce présent papier est le premier de la série et présente le sondage aléatoire simple (SAS). 
+Je vais une fois encore utiliser comme population la base `hobbies` de `FactoMineR`. Je connais deux (02) manière de tenir compte du plan dans les estimations : soit calculer directement les estimations, ce qui nécessite de connaître les formules des estimateurs ; soit appliquer les pondérations (ou encore les probabilités d'inclusions) à la base de données et ensuite utiliser les fonctions du package `survey` pour paramétrer le plan et faire les estimations. Dans ce papier, je vais essayer d'une part de calculer certaines estimations directement sur les données échantillonnées, et d'autre part de calculer les pondérations ; on pourra ensuite faire des comparaisons.
+
+Je remercie mon enseignant de théorie de sondage Mr \textsc {Didier Adjakidje} dont l'enseignement m'a permi de mieux cerner les notions relatives aux sondages qui m'étaient plus floues avant et dont j'utilise d'ailleurs le cours dans ce papier. 
+
+Allons-y
+
+# C'est quoi un sondage ?
+
+Considérons la situation suivante : Un entrepreneur désire installer une bibliothèque dans une certaine région X de **N** individus. Il a l'information que pour que son activité porte, il a besoin que la proportion de personnes qui aiment et pratiquent la lecture excède une valeur $p_0$ donnée, sans quoi il est probable qu'il aille en perte. Evidemment, cet entrepreneur doit chercher à trouver la proportion de personnes qui aiment et pratiquent la lecture dans sa population cible. Mais il se voit en court de moyens pour interroger toute la population de taille $N$. Il décide donc d'interroger une partie **représentative**, qu'on nomme **échantillon** de la population, partie sur la base de laquelle il prendra sa décision, estimant donc que son échantillon reflète suffisamment toutes les caractéristiques de sa population. L'entrepreneur vient de faire un sondage ou un échantillonnage ou encore une enquête. 
+
+Alors là, il faudra s'assurer que les valeurs estimées de la population sont assez proches des valeurs réelles de la population, d'où toute la théorie des sondages. Il est possible qu'en faisant son sondage, il fasse des erreurs. Il existe deux types erreurs qu'il peut commettre : d'une part une erreur d'echantillonnage qui dépend du plan de sondage et de l'estimateur et qui serait nulle s'il s'agissait d'un recensement (recenser toute la population) et d'autre part une erreur de mesure qui peut se remarquer dans la mise en oeuvre de l'enquête. 
+
+Après tout ceci, l'entrepreneur doit valider ses estimations en réalisant des tests d'hypothèses. Décidément, estimations et tests ne sont pas prêts de se séparer...bref.
+
+# Les données à utiliser et détermination de la taille de l'échantillon.
+
+Nous partons de l'idée suivante : on suppose que notre population d'étude est issue d'une base de données existante de laquelle nous allons extraire notre échantillon. Dans la pratique, cette base n'existe pas, c'est elle qu'on veut approcher sur la base de certains indicateurs. 
+
+## Les données
+
+### Présentation
+
+Je vous propose une fois encore la base `hobbies` du package `FactoMineR` de R. Vous pouvez trouver l'aide en tapant `help(hobbies)` dans une console R, sachant bien sûr que le package est chargé. Ici, on ne va s'interesser qu'aux variables `Reading`, `nb.activitees`. Pourquoi ce n'est que ces varibles qui nous intéressent ? Généralement, on estime trois (03) types de variables : catégoriel binaire, catégoriel multiple et quantitatif ; mais on sait qu'une variable catégorielle multiple peut toujours être dichotomiser en considérant chaque modalité comme une nouvelle variable, ce qui rejoint le cas binaire. Nous pourrons garder aussi certaines caractéristiques de la population.
+
+Affichons un extrait des données :
+```{r, fig.cap="Extrait", fig.align="center", out.width="100%", fig.height=3, fig.width=13, echo=TRUE}
+# Fonction pour extraire le début et la fin d'une base
+library(tibble)
+extraitdf = function(data, tete = 3, queue = 3, NomLigne = "N°"){
+  for(i in 1:ncol(data)) data[, i] = as.character(data[, i])
+  tab = rbind(
+    head(rownames_to_column(data, NomLigne), tete),
+    rep(":", 10),
+    tail(rownames_to_column(data, NomLigne), queue)
+  )
+  row.names(tab)[tete+1] = ":"
+  return(tab)
+}
+```
+
+```{r, fig.cap="Extrait", fig.align="center", out.width="100%", fig.height=2.8, fig.width=6, echo=TRUE}
+library(FactoMineR) ; library(ggpubr) ; data("hobbies")
+b = hobbies[c("Reading", "Sex", "Age", "Marital status", "Profession", "nb.activitees")]
+ggtexttable(
+  extraitdf(b, 4, 4), 
+  theme = ttheme(base_style = "light", base_size = 8)
+)+theme_bw()
+```
+
+### Description
+Nous sommes donc en présence de `r nrow(b)` individus dans la population. Une analyse descriptive peut être nécessaire pour comparaison avec l'échantillon après. 
+```{r}
+# nb.activitees
+aff = function(x, dig = 6) format(round(x, dig), nsmall = dig)
+X = b$nb.activitees
+st = data.frame(row.names = "nb.activitees",
+  Total = aff(sum(X)),
+  Moyenne = aff(mean(X)),
+  Variance = aff((length(X)-1)*var(X)/length(X)),
+  "Quasi-variance" =  var(X),
+  Mediane = aff(median(X)),
+  Maximum = aff(max(X)),
+  Minimum = aff(min(X)),
+  Obs. = length(X)
+)
+
+# Les autres
+library(questionr)
+fr = apply(b[, -ncol(b)], 2, function(x) freq(x, total = T))
+for (i in 1:length(fr)) {
+  assign(
+    paste0("x",i), 
+    ggtexttable(
+      data.frame(fr[i])[,-3], 
+      theme = ttheme(base_style = "light", base_size = 10)
+    )+theme_bw()
+  )
+}
+```
+
+```{r, fig.cap="Statistiques descriptives univariées", fig.height=4.5, fig.width=11}
+library(cowplot)
+plot_grid(
+  plot_grid(
+    plot_grid(
+      x1, x2, ncol = 1, 
+      labels = c("Reading", "Sex"), label_size = 10, vjust = 2
+    ), x3, x4, x5, nrow = 1, 
+    labels = c("", "Age", "Martal status", "Profession"), 
+    rel_widths = c(1,1,1.5,1.5), label_size = 10, vjust = 3
+  ),
+  ggtexttable(st, theme = ttheme(base_style = "light", base_size = 10))+theme_bw(),
+  ncol = 1, rel_heights = c(3,1), labels = c("", "nb.activitees"), 
+  label_size = 10, vjust = 3
+)
+```
+
+Plus des $2/3$ de la population pratiquent la lecture comme hobby et en moyenne environ $7$ hobbies sont effectués par chaque individu. Le total du nombre de hobbies pratiqué n'a peut-être aucun sens dans la pratique. Mais, retenons le pour comparaison. La proportion de ceux qui font la lecture, le total du nombre d'activités pratiquées, sa moyenne, les variances des moyenne et proportion, les variances des totaux, ainsi que les intervalles de confiance sont les informations que nous allons estimer à travers les sondages. La variable Profession présente des valeurs manquantes. Nous pourrons les corriger au besoin.
+
+## Calcul de la taille de l'échantillon
+
+Avant tout, décidons de la taille de notre échantillon. Supposons que l'on est préoccupé par une marge d'erreur qu'on ne veut pas dépasser. On part de l'intervalle de confiance de la moyenne.
+$$
+IC_{1-\alpha}(\bar y) = \Bigg[\bar y- z_{1-{\alpha\over 2}}\cdot \sqrt{\Big(1-f\Big)\cdot{S^2\over n}}\quad ;\quad \bar y + z_{1-{\alpha\over 2}}\cdot \sqrt{\Big(1-f\Big)\cdot{S^2\over n}}\Bigg]
+\quad avec\quad f={n\over N}
+$$
+Plus cet intervalle est petit, meilleur sera la précision de la moyenne estimé. Il s'agit donc de rendre nulle à $\epsilon$ près la quantité $z_{1-{\alpha\over 2}}\cdot \sqrt{(1-f)\cdot{S^2\over n}}$. On a donc :
+$$
+\begin{aligned}
+z_{1-{\alpha\over 2}}\cdot \sqrt{(1-{n\over N})\cdot{S^2\over n}} \leq\epsilon \quad &\Rightarrow \quad z_{1-{\alpha\over 2}}^2\cdot (1-{n\over N})\cdot{S^2\over n} \leq\epsilon^2\\
+& \Rightarrow \quad z_{1-{\alpha\over 2}}^2\cdot (N-n)\cdot S^2 \leq nN\epsilon^2\\
+& \Rightarrow \quad n\cdot(N\epsilon^2+z_{1-{\alpha\over 2}}^2\cdot S^2)\geq z_{1-{\alpha\over 2}}^2\cdot N\cdot S^2\\
+& \Rightarrow \quad n\geq {z_{1-{\alpha\over 2}}^2\cdot N\cdot S^2 \over N\epsilon^2+z_{1-{\alpha\over 2}}^2\cdot S^2}
+\end{aligned}
+$$
+La variance de la population $S^2$ est censé inconnue. Son estimateur $s^2$ est aussi inconnu car le sondage n'est pas encore réalisé. Il faut donc l'estimer. Notre variable d'intérêt est le fait d'avoir la lecture comme hobby ou non (La variable Reading prenant 0 ou 1). On est en présence d'une expérience de Bernouilli et donc on peut approcher $s^2$ par $p(1-p)$, $p$ étant la proportion de ceux qui pratiquent la lecture dans la population, qu'on pourrait connaître à travers des études antérieures ou par avis d'un expert. La taille $n$ peut donc être approchée par :
+$$
+n \geq {z_{1-{\alpha\over 2}}^2 \cdot N\cdot p\cdot (1-p)\over N\cdot \epsilon^2+z_{1-{\alpha\over 2}}^2\cdot p\cdot (1-p)}
+$$
+qui est normalement sensiblement égale à $n \simeq {z_{1-{\alpha\over 2}}^2\cdot p\cdot (1-p)\over \epsilon^2}$ lorsque $N>>n$. Mais, nous allons nous contenter de la formule précédente. $\epsilon$ la marge d'erreur souhaitée; $z_{1-{\alpha\over 2}}$ le quantile normal associé au niveau de confiance $1-\alpha$ précisé.
+```{r}
+N = nrow(b)
+eps = 0.05
+alp = 0.05
+z = qnorm(1-alp/2)
+p = sum(b$Reading==1)/nrow(b)
+n = floor(z^2*N*p*(1-p)/(N*eps^2 + p*(1-p)*z^2))+1
+```
+On trouve $p=$ `r p`. Prenant, $\epsilon=5\%\quad et \quad z_{1-{\alpha\over 2}}\simeq 1.96$ pour un niveau de confiance de $95\%$, on obtient $n\geq$ `r z^2*N*p*(1-p)/(N*eps^2 + p*(1-p)*z^2)`. On peut donc prendre $n =$ `r floor(z^2*N*p*(1-p)/(N*eps^2 + p*(1-p)*z^2))+1`.
+
+# le sondage aléatoire simple (SAS)
+
+C'est un échantillonnage équiprobable ; chaque échantillon possible (de même taille $n$) a la même probabilité d'être choisi et chaque unité a la même probabilité d'appartenir à l'échantillon. Il peut être avec ou sans remise selon l'objectif. Il est fait de manière qu'on puisse obtenir tous les $C_N^n$ échantillons possibles (si sans remise par exemple). C'est une méthode bien appropriée pour les populations ayant une certaine homogénéité par rapport à la variable d'intérêt. Nous allons avancer avec le SAS sans remise.
+
+## Echantillonnage
+
+Il existe plusieurs méthodes pour faire un SAS mais nous allons retenir ici le **draw by draw** dont l'algorithme se présente comme suit : pour $i=1, \cdots,n$, on tire l'individu $k_{(i)}$ au hasard avec un probabilité de $1\over N-i-1$ que l'on retire ensuite.
+
+```{r echo=TRUE}
+dbd = function(n, v){ # n est la taille de l'echantillon
+  # v est l'ensemble dans lequel le tirage doit être fait, ici les identifiants
+  res = c()
+  for (i in 1:n) {
+    tir = sample(v, 1)  # Le i ème élément tiré
+    res = c(res, tir)   # On range l'individu tiré
+    v = v[! v %in% tir] # On ôte l'individu tiré de l'ensemble de tirage
+  }
+  return(res)
+}
+dbd_ = dbd(n = n, v = rownames(b))
+EchSas = b[dbd_, ]
+```
+
+## Les estimations
+
+Pour une variable continue, on désire obtenir les estimations du total, de la moyenne, de la variance du total, de la variance de la moyenne, des intervalles de confiance de la moyenne et du total, données respectivement par :
+$$
+\hat T_Y=N\bar y \quad ; \quad 
+\bar y={1\over n}\sum_{j=1}^n y_i \quad ; \quad 
+\widehat{Var(\bar T_Y)}=N^2\cdot\Big(1-f\Big)\cdot{s^2\over n} \quad ; \quad 
+\widehat{Var(\bar y)}=\Big(1-f\Big)\cdot{s^2\over n}  \quad ; \quad 
+$$
+$$
+IC_{(1-\alpha)}(\bar y) = \Bigg[\bar y- z_{1-{\alpha\over 2}}\cdot \sqrt{\Big(1-f\Big)\cdot{S^2\over n}}\quad ;\quad \bar y + z_{1-{\alpha\over 2}}\cdot \sqrt{\Big(1-f\Big)\cdot{S^2\over n}}\Bigg] \quad ; \quad
+$$
+$$
+IC_{(1-\alpha)}(T_Y) = \Bigg[N\bar y- z_{1-{\alpha\over 2}}N \sqrt{\Big(1-f\Big)\cdot{S^2\over n}}\quad ;\quad N\bar y + z_{1-{\alpha\over 2}}N \sqrt{\Big(1-f\Big)\cdot{S^2\over n}}\Bigg]
+$$
+Pour une variable binaire $Y$ de la population, on doit estimer une proportion identifiée par $p={1\over N}\sum_{i=1}^N Y_i=\bar Y$ de variance $\sigma_Y^2=p(1-p)$ et une quasi-variance de $S_Y^2={N\over N-1} p(1-p)$. On a :
+$$
+\widehat p = \bar y={1\over n}\sum_{i=1}^n y_i \quad ; \quad
+\widehat {Var(\widehat p)}=\Big(1-{n\over N}\Big){\widehat p(1-\widehat p)\over n-1} \quad ; \quad
+IC_{(1-\alpha)}=\Bigg[\widehat p-z_{1-{\alpha\over 2}}\sqrt{\widehat {Var(\widehat p)}};\quad \widehat p+z_{1-{\alpha\over 2}}\sqrt{\widehat {Var(\widehat p)}} \Bigg]
+$$
+
+On peut créer ces fonctions estimateurs sous R comme suit :
+```{r echo=TRUE, include=TRUE}
+# Variable quantitative. tirage sans remise
+# =========================================
+alpha = 0.05 # Le seuil
+total = function(x) N*mean(x) ; moyenne = mean # Le total
+variance.Moyenne = function(x) (1-n/N)*var(x)/n # La variance de la moyenne
+variance.Total = function(x) N^2*(1-n/N)*var(x)/n # La variance du total
+# Intervalle de confiance de la moyenne
+int.Conf.M = function(x) {
+  icg = round(mean(x)-qnorm(1-alpha/2)*sqrt((1-n/N)*var(x)/n), 2)
+  icd = round(mean(x)+qnorm(1-alpha/2)*sqrt((1-n/N)*var(x)/n), 2)
+  return(paste0("[", icg, " ; ", icd, "]"))
+}
+# Intervalle de confiance du total
+int.Conf.T = function(x) {
+  icg = round(N*mean(x)-qnorm(1-alpha/2)*N*sqrt((1-n/N)*var(x)/n), 2)
+  icd = round(N*mean(x)+qnorm(1-alpha/2)*N*sqrt((1-n/N)*var(x)/n), 2)
+  return(paste0("[", icg, " ; ", icd, "]"))
+}
+variance = var # variance
+
+
+# Variable dichotomique : proportion.
+# ============================================================
+p = mean # La proportion, équivalente à la moyenne
+Variance.p = function(x) (1-n/N) * p(x)*(1-p(x))/(n-1) # Variance de la proportion
+# Intervalle de confiance de la moyenne
+int.Conf.p = function(x) {
+  icg = round(p(x)-qnorm(1-alpha/2)*sqrt(Variance.p(x)), 4)
+  icd = round(p(x)+qnorm(1-alpha/2)*sqrt(Variance.p(x)), 4)
+  return(paste0("[", icg, " ; ", icd, "]"))
+}
+```
+
+Les estimations sont donc :
+
+```{r echo=TRUE, include=TRUE, fig.height=2.5, fig.width=13, fig.cap="Les estimations, cas du SAS"}
+theme_ = function(taille = 8) ttheme(base_style = "light", base_size = taille)
+
+x = EchSas$nb.activitees
+stSas.nb = data.frame(
+  Total = aff(total(x)),
+  Variance.Total = aff(variance.Total(x)),
+  Moyenne = aff(moyenne(x)),
+  Variance.Moyenne = aff(variance.Moyenne(x)),
+  Int.Conf.M = int.Conf.M(x),
+  Int.Conf.T = int.Conf.T(x),
+  Variance = aff(variance(x)),
+  Obs. = length(x)
+)
+y = as.numeric(EchSas$Reading == 1)
+stSas.Rd = data.frame(
+  Proportion = p(y),
+  Variance.Proportion = Variance.p(y),
+  Int.conf.Prop = int.Conf.p(y)
+)
+
+plot_grid(
+  ggtexttable(stSas.nb, theme = theme_(11), rows = NULL)+theme_bw(),
+  ggtexttable(stSas.Rd, theme = theme_(11), rows = NULL)+theme_bw(),
+  ggtexttable(st, theme = theme_(11))+theme_bw(),
+  ggtexttable(data.frame(proportion = sum(b$Reading==1)/nrow(b)), 
+              rows = NULL, theme=theme_(11))+theme_bw(),
+  nrow = 2, label_size = 11, vjust = 2, rel_widths = c(2,0.9,2,0.9), 
+  labels = c("nb.activitees (SAS)", "Reading (SAS)", 
+             "nb.activitees (population)", "Reading (population)")
+  
+)
+
+```
+J'ai affiché également les valeurs dans la population. Nos estimations semblent un peu approcher la population. Pour notre entrepreneur de départ, il va décider que `r round(stSas.Rd$Proportion*100,2)`% de la population pratiquent la lecture, au lieu de `r round(sum(b$Reading==1)*100/nrow(b),2)`%, soit une erreur absolue d'environ `r abs(round(sum(b$Reading==1)*100/nrow(b)-stSas.Rd$Proportion*100))` point de pourcentage. 
+
+Il faudra à présent qu'il valide donc son projet en vérifiant si la proportion obtenue dépasse vraiment le seuil $p_0$. Il fera donc un test d'hypothèses qu'on verra dans la $4^{ème}$ partie.
+
+## Les pondérations
+Pour le SAS, le poids reste le même pour chaque individu et est égal à l'inverse de la probabilité d'inclusion. Si $p_i={n\over N}$ est la probabilité d'inclusion, le poids de l'individu $i,\ \forall\ i\in \{1,\cdots,n\}$ échantillonné vaut $\pi_i={1\over p_i}={1\over{n\over N}}={N\over n}\simeq$ `r round(N/n, 2)`.
+
+Sous le logiciel $\mathcal{R}$, le package `survey` nous sera très utile. En effet, il nous permettra de pouvoir paramétrer la base de données pour la prise en compte du plan d'échantillonnage (avec sa fonction `svydesign`, l'équivalent de `svyset` sous stata), il contient également un ensemble de fonctions pouvant permettre d'avoir des résultats prenant en compte le plan. Parlons de la fonction principale `svydesign`. Avec un `help(svydesign)`, on peut obtenir l'aide sur la fonction. Certains de ces importants arguments (Voir Analyse-R (Mars 2020), page 516-518) sont :
+
+*- `ids` obligatoire qui est une formule pour spécifier les différents niveaux d'un tirage en grappe. Elle vaut `~1` dans notre cas (le SAS).*
+
+*- `strata` la variable identifiant les strates si l'échantillon est stratifié. On n'en a pas besoin ici, puisqu'il s'agit d'un SAS.*
+
+*- `probs` spécifie la variable contenant la probabilité (d'inclusion) de chaque individu d'être tiré.*
+
+*- `weights` en alternative à l'argument `probs` pour spécifie la pondération de chaque individu (proportionnelle à l'inverse de `probs`).*
+
+*- `fpc`. "Si l’échantillon est stratifié, qu’au sein de chaque strate les individus ont été tirés au sort de manière aléatoire et que l’on connaît la taille de chaque strate, il est possible de ne pas avoir à spécifier la probabilité de tirage ou la pondération de chaque observation. Il est préférable de fournir une variable contenant la taille de chaque strate à l’argument fpc . De plus, dans ce cas-là, une petite correction sera appliquée au modèle pour prendre en compte la taille finie de chaque strate."*
+
+Pour le SAS, la commande `planSAS <- svydesign(ids = ~1, data = EchSas)` permet bien de définir le plan de sondage, puisque les poids sont les mêmes et donc il n'est pas nécessaire de les préciser. Le seul souci est que toutes les estimations ne sont pas très bien ajustées à la population, notamment le total qui ne sera pas de l'ordre de la population mais seulement de l'échantillon. C'est un peu comme si ce sont des poids $1$ qui sont appliqués à toutes les observations. Pour cela, j'ai décidé de pondérer les données avec les bons poids. Et on a :
+```{r}
+EchSas$pond = N/n
+library(survey)
+planSAS <- svydesign(ids = ~1, data = EchSas, weights = ~pond)
+```
+
+```{r}
+Tot.Var.Moy = function(plan){
+  Total = data.frame(
+    row.names = "Total", 
+    Valeur = as.data.frame(svytotal(~nb.activitees, plan))[1,1],
+    Variance = as.data.frame(svytotal(~nb.activitees, plan))[1,2]^2,
+    Int.conf = paste0(
+      "[", confint(svytotal(~nb.activitees, plan))[1,1]," ; ",
+      confint(svytotal(~nb.activitees, plan))[1,2], "]"
+    )
+  )
+  
+  Variance = data.frame(
+    row.names = "Variance", 
+    Valeur = as.data.frame(svyvar(~nb.activitees, plan))[1,1],
+    Variance = "",
+    Int.conf = ""
+  )
+  Moyenne = data.frame(
+    row.names = "Moyenne", 
+    Valeur = as.data.frame(svymean(~nb.activitees, plan))[1,1],
+    Variance = as.data.frame(svymean(~nb.activitees, plan))[1,2]^2,
+    Int.conf = paste0(
+      "[", confint(svymean(~nb.activitees, plan))[1,1]," ; ",
+      confint(svymean(~nb.activitees, plan))[1,2], "]"
+    )
+  )
+  return(rbind(Total, Moyenne, Variance))
+}
+d.prop = data.frame(
+  row.names = "valeur",
+  Proportion = as.vector(svyciprop(~Reading, planSAS)),
+  Int.conf.P = paste0(
+    "[", confint(svyciprop(~Reading, planSAS))[1,1]," ; ",
+    confint(svyciprop(~Reading, planSAS))[1,2], "]"
+  )
+)
+
+```
+
+```{r fig.align="center", out.width="100%", fig.height=1.7, fig.width=12}
+plot_grid(
+  ggtexttable(Tot.Var.Moy(planSAS), theme = theme_(12))+theme_bw(),
+  ggtexttable(t(d.prop), theme = theme_(12))+theme_bw(),
+  nrow = 1, rel_widths = c(1.5,1), 
+  labels = c("nb.activitees (SAS)", "Reading")
+)
+```
+Les estimations sont conformes avec celles calculées directement. On observe cependant certaines différentes quant aux variances et donc aussi au niveau des intervalles de confiance. En fait, j'ai réalisé que les fonctions `svy-` utilisées ne tiennent pas compte du taux de sondage $f={n\over N}$ pour le calcul, elles suppose donc un tirage avec remise. En effet, dans le cadre avec remise, l'estimation de la variance de la moyenne $\widehat {Var(\bar y)} = {s^2\over n} = {var(EchSas\$nb.activitees)\over n}=$ `r var(EchSas$nb.activitees)/n` et celle de la variance du total $\widehat {Var(\bar y)} = {N^2\over n}s^2 = {N*N\over n} * var(EchSas\$nb.activitees) =$ `r N^2*var(EchSas$nb.activitees)/n` et elles sont en conformité avec les résultats précédents. 
+
+Je n'ai pas trouvé d'alternative à ça pour le package `survey`. Dans tous les cas, si $N$ est suffisamment grand devant $n$ plus ou moins négligeable (donc un taux de sondage faible, ici $f=$ `r round(n*100/N,2)`%), la probabilité de tirer de nouveau un individu déjà tiré est faible, aussi le facteur $(1-f) \rightarrow 1$ quand $f \rightarrow 0$. Les résultats ne peuvent qu'être proche. 
+
+Pour conclure sur le SAS, l'échantillonnage par SAS peut permettre d'obtenir de bons estimateurs sur une population. Mais, le pur aléa peut s'avérer des fois néfastes. C'est beaucoup plus le cas quand la taille de la population est très élevée. On peut très facilement se retrouver à côté, avec un estimateur peu précis ou biaisé. En effet le fait que tous les échantillons peuvent apparaître avec une probabilité égale fait que l'échantillon peut se retrouver loin de ce que l'on veut vraiment capter. Et si par exemple on se retrouvait à échantillonner beaucoup plus ceux qui n'ont aucun niveau d'étude ? Il est donc évident qu'on aura une faible proportion pour les personnes aimant la lecture : les estimations seraient biaisés. Et si, on obtenait un peu de tous les groupes d'âges alors qu'il y a par exemple beaucoup plus de personnes agées de 35 à 45 ans. Les estimateurs risquent dans ce cas d'être moins précis. D'où, on peut être amené à d'autres méthodes qui donnent une direction à l'aléa et ces méthodes sont censées mieux faire que le SAS.
+
+# Extension : Test d'hypothèses
+```{r include=FALSE}
+p0=0.5
+alpha = 0.05
+```
+
+On se ramène dans le cas de l'entrepreneur qui veut voir si l'estimation de la proportion qui est faite dépasse ou non le seuil de $p_0=0,5$. Pour cette partie, je vous envoie vers le document de Magalie Fromont (2015-16) portant sur les tests statistiques (page 19 - et moins si on veut mieux cerner les choses).
+
+Soit $(Y_1,\cdots,Y_n)$, avec $n=$ `r n` notre échantillon de variables aléatoires de loi de Bernoulli $\mathcal{B}(p)$ avec $p=\mathbb{P}(Y_i=1)$. Notons $P_p=\mathcal{B}(p)^{\otimes n}$. On considère le modèle statistique $(\{0,1\}^n, P_p)_{p\in [0,1]}$. On veut tester :
+$$
+\begin{cases}
+(H_0):\quad p\le p_0\\
+(H_1):\quad p> p_0
+\end{cases}
+$$
+On va en fait se prémunir en priorité du risque de dire que la proportion des personnes faisant la lecture est supérieure à $p_0$ alors qu'elle est plutôt inférieure à $p_0$ (c'est le risque de $1^{ère}$ espèce $\alpha$).
+
+Nous considérons la statistique de test $T(y)={1\over n}\sum_{i=1}^n y_i=\widehat p$ et aussi la fonction de test $\phi=\mathbb{I}_{\widehat p>C}$ de région de rejet $W=\{\widehat p>C\}$, avec $\mathbb{P}(\widehat p>C)=\alpha=0,05$. Par le TCL, ${\sqrt n(\widehat p-p_0)\over \sqrt{p_0(1-p_0)}} \stackrel{\mathcal{L}}{\to }\mathcal{N}(0,1)$. 
+D'ailleurs $\mathcal{B}(n, p_0)$ qui peut être approchée à la loi normale $\mathcal{N}(np_0,np_0(1-p_0))$ si $n=$ `r n`$>30$, $np_0=$ `r n*p0`$>5$ et $n(1-p_0)=$ `r n*(1-p0)`$>5$.
+
+Alors, 
+$$
+\mathbb{P}(\widehat p>C)=\alpha \Rightarrow \mathbb{P}\Bigg({\sqrt n(\widehat p-p_0)\over \sqrt{p_0(1-p_0)}}>{\sqrt n(C-p_0)\over \sqrt{p_0(1-p_0)}}\Bigg)=\alpha \Rightarrow \mathbb{P}\Bigg(\mathcal{N}(0,1)\le{\sqrt n(C-p_0)\over \sqrt{p_0(1-p_0)}}\Bigg)=1-\alpha
+$$
+$$
+\begin{aligned}
+{\sqrt n(C-p_0)\over \sqrt{p_0(1-p_0)}}=q_{1-\alpha}\quad &\Rightarrow \quad C=p_0+q_{1-\alpha}{\sqrt{p_0(1-p_0)}\over \sqrt n}\\
+& \Rightarrow \quad C = 0,5+1,645*{\sqrt{0,05(1-0,05)}\over \sqrt {326}}
+\end{aligned}
+$$
+Soit $C=$ `r p0+qnorm(1-alpha)*sqrt(p0*(1-p0))/sqrt(n)`
+
+```{r include=FALSE}
+C = p0+qnorm(1-alpha)*sqrt(p0*(1-p0))/sqrt(n)
+C
+```
+La région de rejet devient donc $W=\{\widehat p>$ `r C`$\}$. Dans l'échantillon, on a obtenu $\widehat p=$ `r stSas.Rd$Proportion` qui est bien supérieur à `r C`. On rejette donc au seuil de `r alpha*100`% l'hypothèse nulle selon laquelle $\widehat p\leq$ `r p0`. 
+
+**Conclusion : Il y a assez d'évidence de dire que le projet pourrait bien marcher dans la région X en question.**
+
+# Note 
+
+Vous êtes peut-être intéressés par tout ça, vous avez des questions, des remarques, suggestions, propositions d'amélioration, vous avez des projets, des études pour lesquels vous avez peut-être besoin d'aide ou autres,... vous pouvez me contacter sur le **amoussoukokou96@gmail.com**. Merci !!!
+
+# Quelques références
+
+[1] Boutin, D. Echantillonnage. https://docplayer.fr/63593583-Chapitre-2-echantillonnage-delphine-boutin.html
+
+[2] Chauvet, G. (2015) Méthodes de sondage - Echantillonnage et Redressement.
+
+[3] Larmarange, J. (2021) analyse-R, Introduction à l’analyse d’enquêtes avec R et RStudio. 
+
+[4] Larmarange, J. (2007). Tests statistiques et régressions logistiques sous R, avec prise en compte des plans d’échantillonnage complexes. https://joseph.larmarange.net/IMG/pdf/tests_faciles_tuto.pdf
+
+[6] Fromont, M. (2015-16) Tests Statistiques - Rejeter, ne pas rejeter... Se risquer ?
+
+[5] Autres...
+
+
+
+
+
+
+
+
+
