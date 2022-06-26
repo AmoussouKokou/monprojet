@@ -1,2 +1,2 @@
 # monprojet
-C'est mon tout premier pour apprendre 
+Des travaux en statistiques avec R 
