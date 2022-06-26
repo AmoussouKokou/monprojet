@@ -8,4 +8,6 @@ library(tidyverse)
 data(iris)
 summary(iris)
 
-ggplot(iris, aes(x = 1, y = Sepal.Length))+geom_boxplot()
+ggplot(iris, aes(x = Species, y = Sepal.Length,
+                 fill = Species, colour = Species))+
+  geom_boxplot(alpha = 0.5)+geom_jitter()
