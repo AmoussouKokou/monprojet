@@ -1,0 +1,383 @@
+---
+title: \Huge \textcolor{blue!50!black}{LE LOGIT BINAIRE / COURBE ROC / ETC. AVEC R\\ \small Des fonctions de stata dans R \\ réalisé par \huge \textsc{AMOUSSOU Kokou} \\ \small amoussoukokou96@gmail.com}
+author: Ingénieur des Travaux Statiqtiques - Elève Ingénieur Statisticiens économiste
+date: "`r Sys.time()`"
+documentclass: article
+mainfont: Calibri
+classoption: a4paper
+# usepackage: inputenc, fontenc, lmodern, babel
+output:
+  pdf_document: 
+    extra_dependencies: ["float", "tikz", "xcolor", "enumitem", "pifont", "titlesec", "lipsum","lmodern", "color", "setspace", "fancyhdr", "babel", "minitoc"]
+    fig_caption: yes
+    keep_tex: yes
+    #toc: yes
+    toc_depth: 6
+    number_sections: yes
+    df_print: tibble
+    fig_crop: no
+in_header: header.tex
+header-includes:
+  - \usepackage{hyperref}
+  - \usepackage[explicit]{titlesec}
+  - \usepackage[english,french]{babel}
+  - \usepackage[french]{minitoc}
+  - \definecolor{Mycol}{RGB}{000,050,100}
+geometry: margin=0.5in
+fontsize : 10pt
+vignette : >
+  %\VignetteIndexEntry{stationery}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  fig.pos = "H", out.extra = ""#, cache = TRUE
+)
+```
+
+```{=tex}
+\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+\tableofcontents
+
+
+\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+```
+
+
+Connaissez-vous le **logit binaire** ? C'est un modèle pour expliquer une variable catégorielle binaire codée 1 pour l'observation d'un phénomène et 0 sinon. On désire connaître la probabilité relative d'appartenance à une catégorie selon des caractéristiques observées. Vous voulez en apprendre ? Veuillez Regarder *Ricco R., Pratique de la Régression Logistique - Régression Logistique Binaire et Polytomique, 2017. https://eric.univ-lyon2.fr/~ricco/cours/cours/pratique_regression_logistique.pdf*. Ce modèle est utilisé dans plusieurs domaines, la médécine par exemple, pour par exemple déterminer à quel point un individu (ayant certaines caractéristiques spécifiques) est susceptible de présenter une maladie par rapport à un autre.
+
+Prenons un exemple : Je vous propose la base `hobbies` du package `FactoMineR` de R. Vous pouvez trouver l'aide sur la base en tapant `help(hobbies)` dans une console R, sachant bien sûr que le package est chargé. Ici, on veut pouvoir expliquer le fait d'avoir pour hobby la lecture `Reading` selon qu'on est femme ou hommes, qu'on est dans une certaine catégorie d'âge,...
+
+# Corrigeons les valeurs manquantes
+Si vous avez chargé la base `hobbies`, vous devez vous rendre compte que la variable Profession présente des valeurs manquantes. Cherchons à la corriger :
+
+L'idée est toute simple. Comme, il s'agit d'une variable catégorielle, nous décidons de corriger avec le mode de la distribution... mais, rassurez-vous, ce ne sera pas fait de manière "brute". Nous allons nous créer des groupes dans les données dans lesquels nous ferons le travail. Admettons que l'Age et le Sex ont une corrélation avec la variable Profession. Imputons donc la variable `Profession` par le mode selon la catégorie simultanée d'`Age` et `Sex`.
+
+```{r, fig.cap="Frequences avant et après imputation", fig.align="center", out.width="100%", fig.height=4.8, fig.width=9, echo=TRUE}
+
+# La fonction mode
+library(FactoMineR)
+data(hobbies)
+d = hobbies
+mod = function(arg){return(names(table(arg)[max(table(arg)) == table(arg)]))}
+library(questionr)
+avI = freq(d$Profession, total = TRUE) 
+
+# Création des groupes
+library(dplyr)
+tab = d %>% group_by(Age, Sex) %>% 
+  summarise(
+    mode = mod(Profession), 
+    n = n(), 
+    n.NA = sum(is.na(Profession)),
+    "%" = round(sum(is.na(Profession))*100/n(), 2)
+  )
+
+# Imputation par le mode de chaque groupe
+library(data.table)
+tab = data.table(tab)
+for(i in (1:dim(d)[1])){
+  if(is.na(d$Profession[i])){
+    d$Profession[i] = tab[tab$Age == d$Age[i] & tab$Sex == d$Sex[i]]$mode
+  }
+}
+apI = freq(d$Profession, total = TRUE)
+
+# Affichage
+library(ggpubr); library(cowplot)
+theme1 = function(taille = 12) ttheme(base_style = "light", base_size = taille)
+plot_grid(
+  ggtexttable(avI, theme = theme1(8))%>%
+    tab_add_title(text = "Avant imputation"),
+  ggtexttable(tab, theme = theme1(8), rows = NULL)%>%
+    tab_add_title(text = "Les groupes pour l'imputation", size = 8),
+  ggtexttable(apI, theme = theme1(8))%>%
+    tab_add_title(text = "Après imputation"),
+  nrow = 1
+)
+```
+
+# Bon, on y va maintenant !!!
+
+Le calcul du modèle se fait avec la fonction `glm` sous R.
+```{r echo=TRUE}
+reg = glm(Reading ~ Sex + Age + `Marital status` + Profession + nb.activitees, 
+          data = d, family = binomial())
+```
+
+Je vous présente les résultats de manière plus attrayante :
+
+```{r, fig.cap="Coefficients du modèle", fig.align="center", out.width="100%", echo=TRUE}
+library(forestmodel)
+forest_model(model = reg, exponentiate = F,
+             format_options = forest_model_format_options(
+               colour = "darkblue",
+               color = NULL,
+               shape = 15,
+               text_size = 3,
+               point_size = 2,
+               banded = TRUE
+             )
+)
+```
+
+C'est en réalité les coefficients qui sont présentés ci-dessus. Mais pour le modèle logit, les coefficients ne sont pas directement interprétables, si ce n'est leur signe ou au mieux seulement une comparaison relative à la référence. Pour quantifier la comparaison, on pourrait donc passer par les effets marginaux ou encore les odds ratio (rapport de côte), qui ne sont que l'exponentiel des coefficients. On obtient :
+
+```{r, fig.cap="Odds ratio", fig.align="center", out.width="100%", echo=TRUE}
+library(forestmodel)
+forest_model(
+  model = reg,
+   format_options = forest_model_format_options(
+     colour = "darkblue",
+     color = NULL,
+     shape = 10,
+     text_size = 3,
+     point_size = 2,
+     banded = TRUE
+   )
+)
+```
+
+On dira par exemple que les femmes ont 2 (2.04) fois plus de probabilité que les hommes de faire la lecture. Aussi, plus on possède de hobbies, plus probable serait comprise la lecture. Plus précisément, une unité additionnelle du nombre de hobbies effectués augmente la probabilité de faire la lecture de 1.6 fois. Je vous laisse déduire le reste.
+
+# Validation et qualité du modèle
+
+En réalité, rigoureusement, on n'avait pas le droit à ce niveau de dire quelque interprétation que ce soit. Il faut prouver que le modèle est de bonne qualité. Vous pouvez mieux vous renseigner sur les tests de validation du modèle binaire avec la référence citée plus haut ou encore sur le net.
+
+## Les courbes de ROC, de sensibilité/spécificité
+
+"La courbe ROC met en relation le taux de vrais positifs TVP (la sensibilité, le rappel) et le taux de faux positifs TFP (TFP = 1 - Spécificité) dans un graphique nuage de points" (Ricco, R. (2017)). Construisons cette courbe sur R. Il y a plusieurs références qui permettent de construire la courbe de ROC sous R. Mais, en explorant certains, je n'ai pas été tout à fait satisfait, si je me réfère à la manière de faire sous stata. Mais, le package `blorr` en propose quand même d'intéressant. Ce package m'a aussi inspiré. La construction de la courbe ROC nécessite la précision d'un seuil (cutoff). Le package `blorr` prend par défaut 0.5 ou alors laisse le choix à l'utilisateur de la mentionner lui-même. Alors qu'ici, nous cherchons à approcher le point d'intersection entre la courbe de sensibilité et de spécificité pour la construction de la courbe ROC par défaut. En spécifiant la bonne valeur du cutoff, on obtient plus d'exactitude quant aux différents résultats. 
+
+Ici, je vous propose quelques fonctions qui permettront d'arriver à la courbe de ROC.
+
+- Une fonction `data_sensp` qui recupère le modèle et un nombre de seuils fixé pour retourner une base de données contenant 4 variables : une série (le nombre doit être spécifié en argument) de valeurs de seuils (cutoff) entre 0 et 1, une série des valeurs de sensibilité, une série des valeurs de spécificité et une dernière qui donne l'opposé des spécificités pour chaque seuil.
+
+- Une fonction `cutoff` qui retourne la valeur approximative de l'intersection de la courbe de sensibilité et de spécificité.
+
+- Une fonction `lsens` (comme on le nommerait en stata), qui retourne le graphe de la courbe de spécificité et de spécificité pour chaque cutoff.
+
+- Une fonction `lroc` qui retourne la courbe de ROC du modèle en fonction des cutoff calculés à partir des seuils. Elle retourne aussi l'AUC (Area Under the Curve) à l'aide de la méthode des trapèzes (j'ai trouvé la procédure sur une page web dont je me rappelle plus exactement).
+
+```{r echo=TRUE}
+# Calculons d'abord les données pour le tracé
+library(labelled)
+library(ggplot2)
+data_sensp = function(modele, n_seuil = 10){
+  S = predict(modele, type = "response")
+  lsensp1 = lsensp2 = lsensp3 = rep(NA, n_seuil)
+  for (s in seq(0, 1, length.out = n_seuil)) {
+    ps = (S > s) * 1
+    lsensp1[round(1+s*(n_seuil-1))] = s # Probability cutoff
+    # sensitivity
+    lsensp2[round(1+s*(n_seuil-1))] = sum((ps == 1)*(modele$y == 1))/sum(modele$y == 1) 
+    # specificity
+    lsensp3[round(1+s*(n_seuil-1))] = 1-sum((ps == 1)*(modele$y == 0))/sum(modele$y == 0) 
+  }
+  dsensp = data.frame(lsensp1,lsensp2,lsensp3)
+  var_label(dsensp$lsensp1) = "Probability cutoff"
+  var_label(dsensp$lsensp2) = "sensitivity"
+  var_label(dsensp$lsensp3) = "specificity"
+  dsensp$lsensp4 = 1-dsensp$lsensp3
+  var_label(dsensp$lsensp4) = "1-specificity"
+
+  return(dsensp)
+}
+
+# Le cutoff
+cutoff = function(modele, n_seuil = 10){
+  dsensp = data_sensp(modele, n_seuil)
+  dsensp$find = dsensp$lsensp2-dsensp$lsensp3
+  i = 1
+  s = seq(1, 0, by = -1/n_seuil)[i]
+  cutoff = dsensp$lsensp1[abs(dsensp$find) < s]
+   
+  while(mean(cutoff)!=cutoff[1] & i <= n_seuil){
+    # La condition mean(cutoff)!=cutoff[1] vérifie s'il y a plusieurs mêmes valeurs
+    # Si oui, il suffit de prendre une ou la moyenne
+    i = i + 1
+    s = seq(1, 0, by = -1/n_seuil)[i]
+    cutoff = dsensp$lsensp1[abs(dsensp$find) < s]
+    # Et si le vecteur cutoff est vide d'un coup ? on prend le vecteur précédent
+    if (length(cutoff)==0){
+      i = i-1
+      s = seq(1, 0, by = -1/n_seuil)[i]
+      cutoff = dsensp$lsensp1[abs(dsensp$find) < s]
+      break
+    }
+  }
+  return(mean(cutoff))
+}
+
+# La courbe de sensibilté / spécificité
+lsens = function(modele, n_seuil = 10, titre = "Courbes Sensitivity/Specificity"){
+  dsensp = data_sensp(modele, n_seuil)
+  ggplot(dsensp, aes(x=lsensp1,y=lsensp2))+geom_line(col = "darkblue")+
+    geom_line(y=dsensp$lsensp3,col='darkred')+
+    labs(x = "Probability cutoff", y = "Sensitivity/Specificity")+
+    ggtitle(titre)
+}
+
+# La courbe de roc
+lroc = function(modele, n_seuil = 10, titre = "Courbe de ROC"){
+  dsensp = data_sensp(modele, n_seuil)
+  # calcul de l'aire sous la courbe
+  height = (dsensp$lsensp2[-1]+dsensp$lsensp2[-length(dsensp$lsensp2)])/2
+  width = -diff(dsensp$lsensp4)
+  auc = sum(height*width)
+  #la courbe
+  message("Aire sous la courbe : ",auc)
+  ggplot(dsensp, aes(x=lsensp4, y=lsensp2))+
+    geom_line(col = 'darkblue') + geom_point(col = 'darkblue')+
+    geom_line(y=sort(dsensp$lsensp4), col='darkred')+
+    labs(x = "1-specificity", y = "Sensitivity")+
+    ggtitle(paste0(titre, " (AUC = ", round(auc, 4),")"))
+}
+```
+
+Pour ce modèle, on obtient un cutoff de `r cutoff(reg, 501)` (`cutoff(reg, 501)`). J'ai pris 501 seuils pour plus d'exactitude. Avec moins de seuils, on a : `r cutoff(reg, 11)` (`cutoff(reg, 11)`).
+
+Les courbes :
+```{r fig.cap="ROC curve , Sensitivity/Specificity curve", fig.align="center", out.width="100%", fig.height=3, fig.width=9, echo=TRUE}
+cowplot::plot_grid(lroc(reg, 11)+theme_light(), lsens(reg, 11)+theme_light())
+```
+
+## estat_class
+Si vous êtes utilisateurs de Stata, et que vous y avez déjà fait le modèle logit, vous connaissez probablement la fonction estat_class. Bon essayons sur R. 
+```{r, echo=TRUE}
+estat_class = function(modele, n_seuil = 10, Vcutoff = cutoff(modele, n_seuil), newdata = NULL, stat_digit = 4,
+                       theme_ = ttheme(base_style = "light", base_size = 9)){
+  tab = table(predict(modele, newdata = newdata, type = "response") >= Vcutoff, modele$y)
+
+  Sensitivity = round(tab[2,2]/(tab[2,2] + tab[1,2]), stat_digit) # P(y_chap = 1 | y = 1) ou VP/(VP + FN) ou Pr( +| D)
+  Specificity = round(tab[1,1]/(tab[2,1] + tab[1,1]), stat_digit) # P(y_chap = 0 | y = 0) ou VN/(VN + FP) ou Pr( -|~D)
+  Pos_Pred_Value = round(tab[2,2]/(tab[2,1] + tab[2,2]), stat_digit) # Pr( D| +)
+  Neg_Pred_Value = round(tab[1,1]/(tab[1,1] + tab[1,2]), stat_digit) # Pr(~D| -)
+  faux_pos_tND = round(tab[2,1]/(tab[1,1] + tab[2,1]), stat_digit) # Pr(+|~D)
+  faux_neg_tD = round(tab[1,2]/(tab[1,2] + tab[2,2]), stat_digit) # Pr(-| D)
+  faux_pos_cP = round(tab[2,1]/(tab[2,1] + tab[2,2]), stat_digit) # Pr(~D| +)
+  faux_neg_cN = round(tab[1,2]/(tab[1,1] + tab[1,2]), stat_digit) # Pr( D| -)
+  Prevalence = round(length(modele$y[modele$y==1])/length(modele$y), stat_digit)
+  Correctly_classified = round(Sensitivity*Prevalence + Specificity*(1-Prevalence), stat_digit)
+  Accuracy = Correctly_classified # Accuracy
+  Precision = Pos_Pred_Value
+  Recall = Sensitivity
+
+  Positive_Class = 1
+  
+  dfr = data.frame(
+    #"Accuracy" = format(Accuracy, nsmall = stat_digit),
+    "Sensibilite Pr( +| D)" = format(Sensitivity, nsmall = stat_digit),
+    "Specificite Pr( -|~D)" = format(Specificity, nsmall = stat_digit),
+    "Positive Predictive Value Pr( D| +)" = format(Pos_Pred_Value, nsmall = stat_digit),
+    "Negative Predictive Value Pr(~D| -)" = format(Neg_Pred_Value, nsmall = stat_digit),
+    "False + rate for true ~D Pr(+|~D)" = format(faux_pos_tND, nsmall = stat_digit),
+    "False - rate for true D Pr(-| D)" = format(faux_neg_tD, nsmall = stat_digit),
+    "False + rate for classified + Pr(~D| +)" = format(faux_pos_cP, nsmall = stat_digit),
+    "False - rate for classified - Pr( D| -)" = format(faux_neg_cN, nsmall = stat_digit),
+    "Correctly classified" = format(Correctly_classified, nsmall = stat_digit),
+    "Prevalence" = format(Prevalence, nsmall = stat_digit)
+    #,"Precision" = format(Precision, nsmall = stat_digit),
+    #"Recall (rappel)" = format(Recall, nsmall = stat_digit),
+    #"'Positive' Class" = format(Positive_Class, width = stat_digit + 2)
+  )
+  
+  names(dfr) = c(
+    #"Accuracy", 
+    "Sensibilite Pr( +| D)", "Specificite Pr( -|~D)",
+    "Positive Predictive Value Pr( D| +)", "Negative Predictive Value Pr(~D| -)",
+    "False + rate for true ~D Pr(+|~D)", "False - rate for true D Pr(-| D)",
+    "False + rate for classified + Pr(~D| +)", "False - rate for classified - Pr( D| -)",
+    "Correctly classified", "Prevalence" 
+    #, "Precision", "Recall (rappel)", "'Positive' Class"
+  )
+  
+  dfr = data.frame(t(dfr))
+  
+  names(dfr) = "Valeur"
+
+  plot_grid(
+    ggtexttable(tab, theme = theme_)%>%
+      tab_add_title(text = "Matrice de confusion", size = 8)+theme_bw(),
+    ggtexttable(dfr, theme = theme_)%>%
+      tab_add_title(text = paste0("Classified + if predicted Pr(D) >=", 
+                                  format(round(Vcutoff, stat_digit), nsmall = stat_digit), 
+                                  " (Cutoff)"), size = 8)+theme_bw(),
+    nrow = 1, rel_widths = c(1,2)
+  )
+}
+```
+
+On obtient :
+ <!-- fig.cap="Matrice de confusion/estat_class" -->
+```{r, fig.align="center", out.width="100%", fig.height=3.5, fig.width=6, echo=TRUE}
+estat_class(reg, n_seuil = 10, theme_ = ttheme(base_style = "light", base_size = 9))
+```
+
+## Autres indicateurs importants
+Avec le package blorr, on peut obtenir d'autres infos importantes sur le modèle.
+```{r echo=TRUE}
+blorr::blr_model_fit_stats(reg)
+```
+
+## Comparons nos résultats avec ceux du package blorr
+
+La courbe ROC :
+```{r fig.cap="Courbe de ROC (comparaison avec blorr)", fig.align="center", out.width="100%", fig.height=3, fig.width=9, echo=TRUE}
+library(blorr)
+library(ggpubr)
+plot_grid(
+  lroc(reg, n_seuil = 10)+theme_light(),
+  blr_roc_curve(blr_gains_table(reg),print_plot = F) + theme_light(),
+  nrow = 1
+)
+
+```
+En réalité, ce sont deux méthodes de calcul différentes mais qui convergent pratiquement vers la même chose.
+
+La matrice de confusion et ses indicateurs :
+
+```{r fig.align="center", out.width="100%", fig.height=3.5, fig.width=7, echo=TRUE}
+print("Notre fonction")
+estat_class(reg, n_seuil = 10, theme_ = ttheme(base_style = "light", base_size = 9))
+print("le package blorr")
+blr_confusion_matrix(reg)
+```
+
+Les résultats sont différents, puisque les valeurs de cutoff diffèrent, 0.5 pour `blorr` et `r cutoff(reg, 10)` (la valeur à l'intersection) pour notre fonction. Reprenons en imposant une valeur de 0.5 pour les deux.
+```{r fig.align="center", out.width="100%", fig.height=3.5, fig.width=7, echo=TRUE}
+print("Notre fonction")
+estat_class(reg, n_seuil = 10, theme_ = ttheme(base_style = "light", base_size = 9), Vcutoff = 0.5)
+print("Le package blorr")
+blr_confusion_matrix(reg, cutoff = 0.5)
+```
+
+Et les résultats sont les mêmes !!!
+
+
+
+# Quelques références
+
+[1] Ricco, R.(2017) Pratique de la Régression Logistique - Régression Logistique Binaire et Polytomique. https://eric.univ-lyon2.fr/~ricco/cours/cours/pratique_regression_logistique.pdf
+
+[2] https://en.wikipedia.org/wiki/Binary_classification
+
+[3] Autres...
+
+
+
+
+
+
+
+
+
+
+
