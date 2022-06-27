@@ -1,3 +1,7 @@
 # monprojet
-Méthode de sondage.
-Modèle logit binaire et prise en compte de plan d'échantillonnage complexe
+
+- Méthodes de sondage avec R.
+
+- Modèle logit binaire 
+
+- prise en compte de plans d'échantillonnage complexe
