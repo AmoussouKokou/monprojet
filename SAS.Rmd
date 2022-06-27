@@ -60,12 +60,6 @@ Je vais une fois encore utiliser comme population la base `hobbies` de `FactoMin
 
 Je remercie mon enseignant de théorie de sondage Mr \textsc {Didier Adjakidje} dont l'enseignement m'a permi de mieux cerner les notions relatives aux sondages qui m'étaient plus floues avant et dont j'utilise d'ailleurs le cours dans ce papier. 
 
-Version 1
-
-```{r}
-print("go!")
-```
-
 
 # C'est quoi un sondage ?
 
